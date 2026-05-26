@@ -1,0 +1,13 @@
+# Build directories and files
+build/
+*.exe
+*.obj
+*.o
+
+# Database files
+*.db
+*.sqlite
+ledger.db
+
+# VS Code settings
+.vscode/
