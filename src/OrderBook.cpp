@@ -2,7 +2,7 @@
 #include <iostream>
 #include <algorithm> 
 
-std::vector<Trade> OrderBook::addOrder(Order order) {
+std::vector<Trade> OrderBook::addOrder(Order &order) {
     std::vector<Trade> trades;
 
     if (order.side == Side::Buy) {
