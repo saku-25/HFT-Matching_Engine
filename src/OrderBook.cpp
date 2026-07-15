@@ -1,14 +1,12 @@
 #include "../include/OrderBook.h"
 #include <iostream>
-#include <algorithm> // Needed for std::min
-
+#include <algorithm> 
 
 std::vector<Trade> OrderBook::addOrder(Order order) {
     std::vector<Trade> trades;
 
     if (order.side == Side::Buy) {
         
-        // --- 1. MATCHING LOOP ---
         while (order.quantity > 0 && !asks.empty()) {
             auto bestAskIter = asks.begin();
             Price bestAskPrice = bestAskIter->first;
@@ -18,7 +16,6 @@ std::vector<Trade> OrderBook::addOrder(Order order) {
 
             int32_t currentAskIndex = level.headIndex;
             
-            // Walk our custom linked list using indices
             while (currentAskIndex != NULL_INDEX && order.quantity > 0) {
                 Order& restingAsk = memoryPool.get(currentAskIndex);
                 Quantity tradeQty = std::min(order.quantity, restingAsk.quantity);
@@ -29,24 +26,21 @@ std::vector<Trade> OrderBook::addOrder(Order order) {
                 restingAsk.quantity -= tradeQty;
 
                 if (restingAsk.quantity == 0) {
-                    // Save next index before we destroy this node
                     int32_t nextIndex = restingAsk.nextOrderIndex; 
                     orderMap.erase(restingAsk.id);
 
-                    // --- THE UNLINKING (Closing the gap) ---
                     if (restingAsk.prevOrderIndex != NULL_INDEX) {
                         memoryPool.get(restingAsk.prevOrderIndex).nextOrderIndex = restingAsk.nextOrderIndex;
                     } else {
-                        level.headIndex = restingAsk.nextOrderIndex; // It was the head
+                        level.headIndex = restingAsk.nextOrderIndex; 
                     }
                     
                     if (restingAsk.nextOrderIndex != NULL_INDEX) {
                         memoryPool.get(restingAsk.nextOrderIndex).prevOrderIndex = restingAsk.prevOrderIndex;
                     } else {
-                        level.tailIndex = restingAsk.prevOrderIndex; // It was the tail
+                        level.tailIndex = restingAsk.prevOrderIndex; 
                     }
 
-                    // Recycle the memory instantly!
                     memoryPool.deallocate(currentAskIndex);
                     currentAskIndex = nextIndex;
                 } else {
@@ -54,29 +48,25 @@ std::vector<Trade> OrderBook::addOrder(Order order) {
                 }
             }
 
-            // Clean up empty price levels
             if (level.headIndex == NULL_INDEX) {
                 asks.erase(bestAskIter);
             }
         }
 
-        // --- 2. RESTING LOOP (Adding to the Pool) ---
         if (order.quantity > 0) {
             int32_t newOrderIndex = memoryPool.allocate();
             Order& newOrder = memoryPool.get(newOrderIndex);
             
-            newOrder = order; // Copy data into the pool
+            newOrder = order; 
             newOrder.nextOrderIndex = NULL_INDEX;
             newOrder.prevOrderIndex = NULL_INDEX;
 
             PriceLevel& level = bids[order.price];
             
             if (level.headIndex == NULL_INDEX) {
-                // First order at this price
                 level.headIndex = newOrderIndex;
                 level.tailIndex = newOrderIndex;
             } else {
-                // Append to the back of the line (Time Priority)
                 newOrder.prevOrderIndex = level.tailIndex;
                 memoryPool.get(level.tailIndex).nextOrderIndex = newOrderIndex;
                 level.tailIndex = newOrderIndex;
@@ -85,7 +75,6 @@ std::vector<Trade> OrderBook::addOrder(Order order) {
         }
 
     } else {
-        // --- SIDE::SELL (The Exact Mirror Image) ---
         while (order.quantity > 0 && !bids.empty()) {
             auto bestBidIter = bids.begin();
             Price bestBidPrice = bestBidIter->first;
@@ -150,16 +139,13 @@ std::vector<Trade> OrderBook::addOrder(Order order) {
     return trades;
 }
 
-
 void OrderBook::cancelOrder(OrderID orderId) {
     auto mapIterator = orderMap.find(orderId);
-    if (mapIterator == orderMap.end()) return; // Order doesn't exist
+    if (mapIterator == orderMap.end()) return; 
 
-    // 1. Get the order index from our hash map
     int32_t orderIndex = mapIterator->second;
     Order& orderToCancel = memoryPool.get(orderIndex);
 
-    // 2. Find which price level this order belongs to
     PriceLevel* level = nullptr;
     if (orderToCancel.side == Side::Buy) {
         level = &bids[orderToCancel.price];
@@ -167,22 +153,18 @@ void OrderBook::cancelOrder(OrderID orderId) {
         level = &asks[orderToCancel.price];
     }
 
-    // 3. The Unlinking (O(1) deletion)
     if (orderToCancel.prevOrderIndex != NULL_INDEX) {
         memoryPool.get(orderToCancel.prevOrderIndex).nextOrderIndex = orderToCancel.nextOrderIndex;
     } else {
-        // If there was no previous order, this was the Head
         level->headIndex = orderToCancel.nextOrderIndex;
     }
 
     if (orderToCancel.nextOrderIndex != NULL_INDEX) {
         memoryPool.get(orderToCancel.nextOrderIndex).prevOrderIndex = orderToCancel.prevOrderIndex;
     } else {
-        // If there was no next order, this was the Tail
         level->tailIndex = orderToCancel.prevOrderIndex;
     }
 
-    // 4. Memory Cleanup: Delete the price level if it is completely empty
     if (level->headIndex == NULL_INDEX) {
         if (orderToCancel.side == Side::Buy) {
             bids.erase(orderToCancel.price);
@@ -191,7 +173,6 @@ void OrderBook::cancelOrder(OrderID orderId) {
         }
     }
 
-    // 5. Remove from fast-lookup map and recycle the memory ticket
     orderMap.erase(mapIterator);
     memoryPool.deallocate(orderIndex);
 }
