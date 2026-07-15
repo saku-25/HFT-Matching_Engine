@@ -8,20 +8,15 @@
 #include "../include/ThreadSafeQueue.h"
 #include "../include/sqlite3.h"
 
-// ========================================================================
-// THE LOGGER THREAD (Database Engineering)
-// ========================================================================
 void loggerThreadFunction(ThreadSafeQueue<Trade>& tradeQueue) {
     std::cout << "[LOGGER] Booting up Optimized Database Engine...\n";
 
     sqlite3* db;
     sqlite3_open("ledger.db", &db);
 
-    // 1. Enable Write-Ahead Logging for maximum disk performance
     sqlite3_exec(db, "PRAGMA journal_mode = WAL;", NULL, 0, NULL);
     sqlite3_exec(db, "PRAGMA synchronous = NORMAL;", NULL, 0, NULL);
 
-    // 2. Create the Schema
     const char* createTableSQL = R"(
         CREATE TABLE IF NOT EXISTS Trades (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,17 +29,14 @@ void loggerThreadFunction(ThreadSafeQueue<Trade>& tradeQueue) {
     )";
     sqlite3_exec(db, createTableSQL, NULL, 0, NULL);
 
-    // 3. The Prepared Statement (Zero string allocation)
     const char* insertSQL = "INSERT INTO Trades (buyer_id, seller_id, price, quantity) VALUES (?, ?, ?, ?);";
     sqlite3_stmt* stmt;
     sqlite3_prepare_v2(db, insertSQL, -1, &stmt, NULL);
 
-    // 4. Start a mass transaction block
     sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, 0, NULL);
     
     int batchCount = 0;
 
-    // 5. The High-Speed Logging Loop
     while (true) {
         std::optional<Trade> tradeOpt = tradeQueue.pop();
         
@@ -55,7 +47,6 @@ void loggerThreadFunction(ThreadSafeQueue<Trade>& tradeQueue) {
 
         Trade trade = tradeOpt.value();
         
-        // Inject integers directly into the compiled SQL statement
         sqlite3_bind_int(stmt, 1, trade.buyerId);
         sqlite3_bind_int(stmt, 2, trade.sellerId);
         sqlite3_bind_int(stmt, 3, trade.price);
@@ -64,7 +55,6 @@ void loggerThreadFunction(ThreadSafeQueue<Trade>& tradeQueue) {
         sqlite3_step(stmt);
         sqlite3_reset(stmt);
 
-        // Batching: Flush to physical hard drive every 10,000 trades
         batchCount++;
         if (batchCount >= 10000) {
             sqlite3_exec(db, "COMMIT;", NULL, 0, NULL);
@@ -74,33 +64,26 @@ void loggerThreadFunction(ThreadSafeQueue<Trade>& tradeQueue) {
         }
     }
 
-    // 6. Clean up
     sqlite3_exec(db, "COMMIT;", NULL, 0, NULL);
     sqlite3_finalize(stmt);
     sqlite3_close(db);
 }
 
-// ========================================================================
-// THE ENGINE & MARKET SIMULATION (Main Thread)
-// ========================================================================
 int main() {
     OrderBook engine;
     ThreadSafeQueue<Trade> tradeQueue;
     
-    // Spin up the background database thread
     std::thread loggerThread(loggerThreadFunction, std::ref(tradeQueue));
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     std::cout << "\n[QUANT] Initializing Market Simulation with Market Maker...\n";
 
-    // Random Number Generators (Monte Carlo Setup)
     std::random_device rd;  
     std::mt19937 gen(rd()); 
-    std::normal_distribution<> priceDist(15000.0, 50.0); // Bell curve around $150.00
-    std::uniform_int_distribution<> qtyDist(10, 100);    // 10 to 100 shares
-    std::uniform_int_distribution<> sideDist(0, 1);      // 50/50 Buy or Sell
+    std::normal_distribution<> priceDist(15000.0, 50.0); 
+    std::uniform_int_distribution<> qtyDist(10, 100);    
+    std::uniform_int_distribution<> sideDist(0, 1);      
 
-    // Market Maker Tracking Variables
     int orderIdCounter = 1;
     int marketMakerProfit = 0;
     int marketMakerInventory = 0; 
@@ -109,10 +92,8 @@ int main() {
 
     auto startTime = std::chrono::high_resolution_clock::now();
 
-    // Run 100 loops (Trading Epochs)
     for (int epoch = 0; epoch < 100; ++epoch) {
         
-        // --- 1. THE INTELLIGENT MARKET MAKER WAKES UP ---
         auto bestBidOpt = engine.getBestBid();
         auto bestAskOpt = engine.getBestAsk();
 
@@ -122,16 +103,13 @@ int main() {
             
             double midPrice = (bid + ask) / 2.0;
 
-            // The Avellaneda-Stoikov Inventory Skew
             double riskAversion = 0.05; 
             double skew = marketMakerInventory * riskAversion;
             double reservationPrice = midPrice - skew;
 
-            // Quote around our risk-adjusted reservation price
             Price myBid = static_cast<Price>(reservationPrice - 1);
             Price myAsk = static_cast<Price>(reservationPrice + 1);
 
-            // Prevent crossed markets
             if (myBid < myAsk) {
                 auto mmBuyTrades = engine.addOrder({static_cast<OrderID>(orderIdCounter++), 0, myBid, 50, 42, Side::Buy});
                 for (const auto& t : mmBuyTrades) tradeQueue.push(t);
@@ -141,8 +119,6 @@ int main() {
             }
         }
 
-        // --- 2. THE NOISE TRADERS ARRIVE ---
-        // Fire 100 random retail orders into the engine
         for (int i = 0; i < 100; ++i) {
             Price randomPrice = static_cast<Price>(priceDist(gen));
             Quantity randomQty = qtyDist(gen);
@@ -153,14 +129,13 @@ int main() {
                 0, 
                 randomPrice, 
                 randomQty, 
-                99, // Trader ID 99 (Retail)
+                99, 
                 randomSide
             });
 
             for (const auto& trade : executions) {
                 tradeQueue.push(trade);
                 
-                // Track Market Maker PnL and Volume if they were involved
                 if (trade.buyerId == 42) {
                     marketMakerInventory += trade.quantity;
                     marketMakerProfit -= (trade.price * trade.quantity); 
@@ -169,7 +144,7 @@ int main() {
                 else if (trade.sellerId == 42) {
                     marketMakerInventory -= trade.quantity;
                     marketMakerProfit += (trade.price * trade.quantity); 
-                    totalSharesSold += trade.quantity;                   
+                    totalSharesSold += trade.quantity;                    
                 }
             }
         }
@@ -179,8 +154,7 @@ int main() {
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
     std::cout << "[ENGINE] Matched 10,000 orders in " << duration.count() << " milliseconds!\n";
 
-    // --- 3. FINAL REPORT & MARK-TO-MARKET PnL ---
-    double finalMidPrice = 15000.0; // Fallback to $150.00
+    double finalMidPrice = 15000.0; 
     auto finalBid = engine.getBestBid();
     auto finalAsk = engine.getBestAsk();
     if (finalBid.has_value() && finalAsk.has_value()) {
@@ -193,7 +167,7 @@ int main() {
 
     std::cout << std::fixed << std::setprecision(2);
     std::cout << "\n========================================\n";
-    std::cout << "      MARKET MAKER FINAL REPORT\n";
+    std::cout << "    MARKET MAKER FINAL REPORT\n";
     std::cout << "========================================\n";
     std::cout << "Total Shares Bought : " << totalSharesBought << "\n";
     std::cout << "Total Shares Sold   : " << totalSharesSold << "\n";
@@ -208,7 +182,6 @@ int main() {
     std::cout << "Mark-to-Market PnL  : $" << trueProfitDollars << "\n";
     std::cout << "========================================\n\n";
 
-    // 4. Graceful Shutdown
     tradeQueue.shutdown();
     loggerThread.join();
 
