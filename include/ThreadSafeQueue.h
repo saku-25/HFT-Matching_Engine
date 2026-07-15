@@ -2,7 +2,7 @@
 #include <queue>
 #include <mutex>
 #include <condition_variable>
-#include <optional> // We can use this again!
+#include <optional>
 
 template <typename T>
 class ThreadSafeQueue {
@@ -10,7 +10,7 @@ private:
     std::queue<T> queue;
     std::mutex mtx;
     std::condition_variable cv;
-    bool killSwitch = false; 
+    bool killSwitch = false;
 
 public:
     ThreadSafeQueue() = default;
@@ -32,7 +32,7 @@ public:
         });
 
         if (killSwitch && queue.empty()) {
-            return std::nullopt; // Safely return nothing
+            return std::nullopt;
         }
 
         T item = queue.front();
